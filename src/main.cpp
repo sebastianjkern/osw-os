@@ -25,19 +25,60 @@ Arduino_DataBus *bus = new Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, T
 Arduino_GC9A01 *gfx = new Arduino_GC9A01(bus, TFT_RESET, 0, true);
 
 void disp_driver_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
-    int32_t x, y;
-    for(y = area->y1; y <= area->y2; y++) {
-        for(x = area->x1; x <= area->x2; x++) {
-            gfx->drawPixel(x, y, *(uint16_t *) color_p);
-            color_p++;
-        }
-    }
-
+    gfx->draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *) color_p, area->x2 - area->x1 +1, area->y2 - area->y1 +1);
     lv_disp_flush_ready(disp);
+}
+
+void setup_gui() {
+
+    // GUI Stuff
+    lv_obj_t *screenMain;
+    screenMain = lv_obj_create(NULL, NULL);
+
+    /*Create a chart*/
+    lv_obj_t * chart;
+    chart = lv_chart_create(screenMain, NULL);
+    lv_obj_set_size(chart, 200, 150);
+    lv_obj_align(chart, NULL, LV_ALIGN_CENTER, 0, 0);
+    lv_chart_set_type(chart, LV_CHART_TYPE_LINE);   /*Show lines and points too*/
+
+    /*Add two data series*/
+    lv_chart_series_t *ser1 = lv_chart_add_series(chart, LV_COLOR_RED);
+    lv_chart_series_t *ser2 = lv_chart_add_series(chart, LV_COLOR_GREEN);
+
+    /*Set the next points on 'ser1'*/
+    lv_chart_set_next(chart, ser1, 10);
+    lv_chart_set_next(chart, ser1, 10);
+    lv_chart_set_next(chart, ser1, 10);
+    lv_chart_set_next(chart, ser1, 10);
+    lv_chart_set_next(chart, ser1, 10);
+    lv_chart_set_next(chart, ser1, 10);
+    lv_chart_set_next(chart, ser1, 10);
+    lv_chart_set_next(chart, ser1, 30);
+    lv_chart_set_next(chart, ser1, 70);
+    lv_chart_set_next(chart, ser1, 90);
+
+    /*Directly set points on 'ser2'*/
+    ser2->points[0] = 90;
+    ser2->points[1] = 70;
+    ser2->points[2] = 65;
+    ser2->points[3] = 65;
+    ser2->points[4] = 65;
+    ser2->points[5] = 65;
+    ser2->points[6] = 65;
+    ser2->points[7] = 65;
+    ser2->points[8] = 65;
+    ser2->points[9] = 65;
+
+    lv_chart_refresh(chart); /*Required after direct set*/
+    lv_scr_load(screenMain);
+    lv_task_handler();
 }
 
 void gui(void *parameter) {
     int counter = 0;
+    setup_gui();
+
     while (true)
     {
         lv_task_handler();
@@ -76,71 +117,34 @@ void read_sensors(void *parameter) {
     vTaskDelete(NULL);
 }
 
-void setup_gui() {
+void init_drivers() {
     // SPI Graphics Driver Initialization
     gfx->begin();
-    gfx->displayOn();
-
+    
     // LVGL Driver Initialization
     lv_init();
 
     static lv_disp_buf_t disp_buf;
-    static lv_color_t buf[240 * 10];
+    static lv_color_t buf[WIDTH * 10];
     lv_disp_drv_t disp_drv;
 
-    lv_disp_buf_init(&disp_buf, buf, NULL, 240 * 10);
+    lv_disp_buf_init(&disp_buf, buf, NULL, WIDTH * 10);
 
     lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res = 240;
-    disp_drv.ver_res = 240;
+    disp_drv.hor_res = WIDTH;
+    disp_drv.ver_res = HEIGHT;
     disp_drv.flush_cb = disp_driver_flush;
     disp_drv.buffer = &disp_buf;
     lv_disp_drv_register(&disp_drv);
 
-    // GUI Stuff
-    lv_obj_t *screenMain;
-    screenMain = lv_obj_create(NULL, NULL);
-
-    lv_obj_t  *calendar = lv_calendar_create(screenMain, NULL);
-    lv_obj_set_size(calendar, 210, 210);
-    lv_obj_align(calendar, NULL, LV_ALIGN_CENTER, 0, 0);
-
-    /*Make the date number smaller to be sure they fit into their area*/
-    lv_obj_set_style_local_text_font(calendar, LV_CALENDAR_PART_DATE, LV_STATE_DEFAULT, lv_theme_get_font_small());
-
-    /*Set today's date*/
-    lv_calendar_date_t today;
-    today.year = 2018;
-    today.month = 10;
-    today.day = 23;
-
-    lv_calendar_set_today_date(calendar, &today);
-    lv_calendar_set_showed_date(calendar, &today);
-
-    /*Highlight a few days*/
-    static lv_calendar_date_t highlighted_days[3];       /*Only its pointer will be saved so should be static*/
-    highlighted_days[0].year = 2018;
-    highlighted_days[0].month = 10;
-    highlighted_days[0].day = 6;
-
-    highlighted_days[1].year = 2018;
-    highlighted_days[1].month = 10;
-    highlighted_days[1].day = 11;
-
-    highlighted_days[2].year = 2018;
-    highlighted_days[2].month = 11;
-    highlighted_days[2].day = 22;
-
-    lv_calendar_set_highlighted_dates(calendar, highlighted_days, 3);
-
-    lv_scr_load(screenMain);
-    lv_task_handler();
+    gfx->displayOn();
 }
+
 
 void setup() {
     Serial.begin(115200);
 
-    setup_gui();
+    init_drivers();
 
     xTaskCreatePinnedToCore(gui, "gui", 10000, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(handle_input, "input", 10000, NULL, 1, NULL, 1);
