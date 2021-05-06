@@ -3,6 +3,9 @@
 #include "Arduino_Display.h"
 #include "Arduino_ESP32SPI.h"
 #include "Arduino_GFX.h"
+
+// Include FreeRTOS TaskDelay
+#define INCLUDE_vTaskDelay 1
 #include "freertos/FreeRTOS.h"
 
 #include "../lvgl/src/lvgl.h"
@@ -17,9 +20,11 @@
 
 #define WIDTH 240
 #define HEIGHT 240
-
 #define CENTER_W 120
 #define CENTER_H 120
+
+#define FRAMERATE 30
+#define FRAMETIME 1000/FRAMERATE
 
 Arduino_DataBus *bus = new Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, TFT_MISO);
 Arduino_GC9A01 *gfx = new Arduino_GC9A01(bus, TFT_RESET, 0, true);
@@ -29,78 +34,38 @@ void disp_driver_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *c
     lv_disp_flush_ready(disp);
 }
 
-void setup_gui() {
+static void arc_loader(lv_task_t * t) {
+    static int16_t a = 270;
+    a+=5;
 
-    // GUI Stuff
-    lv_obj_t *screenMain;
-    screenMain = lv_obj_create(NULL, NULL);
+    lv_arc_set_end_angle((lv_obj_t *) t->user_data, a);
 
-    /*Create a chart*/
-    lv_obj_t * chart;
-    chart = lv_chart_create(screenMain, NULL);
-    lv_obj_set_size(chart, 200, 150);
-    lv_obj_align(chart, NULL, LV_ALIGN_CENTER, 0, 0);
-    lv_chart_set_type(chart, LV_CHART_TYPE_LINE);   /*Show lines and points too*/
-
-    /*Add two data series*/
-    lv_chart_series_t *ser1 = lv_chart_add_series(chart, LV_COLOR_RED);
-    lv_chart_series_t *ser2 = lv_chart_add_series(chart, LV_COLOR_GREEN);
-
-    /*Set the next points on 'ser1'*/
-    lv_chart_set_next(chart, ser1, 10);
-    lv_chart_set_next(chart, ser1, 10);
-    lv_chart_set_next(chart, ser1, 10);
-    lv_chart_set_next(chart, ser1, 10);
-    lv_chart_set_next(chart, ser1, 10);
-    lv_chart_set_next(chart, ser1, 10);
-    lv_chart_set_next(chart, ser1, 10);
-    lv_chart_set_next(chart, ser1, 30);
-    lv_chart_set_next(chart, ser1, 70);
-    lv_chart_set_next(chart, ser1, 90);
-
-    /*Directly set points on 'ser2'*/
-    ser2->points[0] = 90;
-    ser2->points[1] = 70;
-    ser2->points[2] = 65;
-    ser2->points[3] = 65;
-    ser2->points[4] = 65;
-    ser2->points[5] = 65;
-    ser2->points[6] = 65;
-    ser2->points[7] = 65;
-    ser2->points[8] = 65;
-    ser2->points[9] = 65;
-
-    lv_chart_refresh(chart); /*Required after direct set*/
-    lv_scr_load(screenMain);
-    lv_task_handler();
+    if(a >= 270 + 360) {
+        a = 270;
+    }
 }
 
 void gui(void *parameter) {
-    int counter = 0;
-    setup_gui();
+    lv_obj_t * arc = lv_arc_create(lv_scr_act(), NULL);
+    lv_arc_set_bg_angles(arc, 0, 360);
+    lv_arc_set_angles(arc, 270, 270);
+    lv_obj_align(arc, NULL, LV_ALIGN_CENTER, 0, 0);
 
-    while (true)
-    {
-        lv_task_handler();
+    lv_task_create(arc_loader, 20, LV_TASK_PRIO_LOWEST, arc);
 
-        // Limit to 60 fps
-        delay(1000/60);
-        if (counter > 120) {
-            Serial.println("Hello from the GUI Task");
-            counter = 0;
-        } else {
-            counter++;
-        }
-        
+    uint32_t time;
+    
+    for ( ;; ) {
+        time = lv_task_handler();
+        vTaskDelay(time/ portTICK_PERIOD_MS);
     }
     
     vTaskDelete(NULL);
 }
 
 void handle_input(void *parameter) {
-    while (true)
-    {
-        delay(1000);
+    for ( ;; ) {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         Serial.println("Handling input");
     }
     
@@ -108,9 +73,9 @@ void handle_input(void *parameter) {
 }
 
 void read_sensors(void *parameter) {
-    while (true)
+    for ( ;; )
     {
-        delay(1000);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         Serial.println("Handling sensors");
     }
     
@@ -118,18 +83,19 @@ void read_sensors(void *parameter) {
 }
 
 void init_drivers() {
-    // SPI Graphics Driver Initialization
+    // Init SPI Graphics Driver
     gfx->begin();
     
-    // LVGL Driver Initialization
     lv_init();
 
+    // Init the display buffer for lvgl
     static lv_disp_buf_t disp_buf;
     static lv_color_t buf[WIDTH * 10];
     lv_disp_drv_t disp_drv;
 
     lv_disp_buf_init(&disp_buf, buf, NULL, WIDTH * 10);
 
+    // Init the LVGL Display driver
     lv_disp_drv_init(&disp_drv);
     disp_drv.hor_res = WIDTH;
     disp_drv.ver_res = HEIGHT;
@@ -137,9 +103,9 @@ void init_drivers() {
     disp_drv.buffer = &disp_buf;
     lv_disp_drv_register(&disp_drv);
 
+    // Turn the display on after init
     gfx->displayOn();
 }
-
 
 void setup() {
     Serial.begin(115200);
@@ -147,10 +113,11 @@ void setup() {
     init_drivers();
 
     xTaskCreatePinnedToCore(gui, "gui", 10000, NULL, 1, NULL, 0);
+
     xTaskCreatePinnedToCore(handle_input, "input", 10000, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(read_sensors, "sensors", 10000, NULL, 1, NULL, 1);
 }
 
 void loop() {
-  delay(1000/30);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
 }
