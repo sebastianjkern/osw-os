@@ -12,55 +12,7 @@
 
 #include "pins.hpp"
 #include "drvs.hpp"
-
-static void arc_loader(lv_task_t *t)
-{
-    static int16_t a = 270;
-    a += 5;
-
-    lv_arc_set_end_angle((lv_obj_t *)t->user_data, a);
-
-    if (a >= 270 + 360)
-    {
-        a = 270;
-    }
-}
-
-lv_obj_t *app1()
-{
-    lv_obj_t *scr = lv_obj_create(NULL, NULL);
-
-    lv_obj_t *arc = lv_arc_create(scr, NULL);
-    lv_arc_set_bg_angles(arc, 0, 360);
-    lv_arc_set_angles(arc, 270, 270);
-    lv_obj_align(arc, NULL, LV_ALIGN_CENTER, 0, 0);
-
-    lv_task_create(arc_loader, 20, LV_TASK_PRIO_LOWEST, arc);
-
-    return scr;
-}
-
-lv_obj_t *app2()
-{
-    lv_obj_t *scr = lv_obj_create(NULL, NULL);
-    return scr;
-}
-
-lv_obj_t *app3()
-{
-    lv_obj_t *scr = lv_obj_create(NULL, NULL);
-    return scr;
-}
-
-typedef struct
-{
-    uint8_t screen_id = 0;
-#define APP_NUMBER 3
-    lv_obj_t *(*functions[APP_NUMBER])(void) = {
-        app1,
-        app2,
-        app3};
-} screens_t;
+#include "gui.hpp"
 
 static screens_t screens;
 static SemaphoreHandle_t mutex_handle;
@@ -79,6 +31,8 @@ void screen_loader()
             xSemaphoreGive(mutex_handle);
             return;
         }
+
+        Serial.printf("Switching to screen: %i\n", screens.screen_id);
 
         lv_obj_t *handle = lv_scr_act();
         lv_scr_load(screens.functions[screens.screen_id]());
@@ -111,17 +65,26 @@ void handle_input(void *parameter)
     {
         if (xQueueReceive(button_events, &ev, 1000 / portTICK_PERIOD_MS))
         {
-            if ((ev.pin == BTN_1) && (ev.event == BUTTON_DOWN))
+            if ((ev.pin == BTN_1) && (ev.event == BUTTON_UP))
             {
                 Serial.println("Btn1 pressed");
                 if (xSemaphoreTake(mutex_handle, 100) == pdTRUE)
                 {
-                    screens.screen_id = (screens.screen_id + 1) % APP_NUMBER;
+                    if (screens.screen_id - 1 < 0)
+                    {
+                        screens.screen_id = APP_NUMBER - 1;
+                    }
+                    else
+                    {
+                        screens.screen_id--;
+                    }
+
                     xSemaphoreGive(mutex_handle);
                 }
             }
-            if ((ev.pin == BTN_2) && (ev.event == BUTTON_DOWN))
+            if ((ev.pin == BTN_2) && (ev.event == BUTTON_UP))
             {
+                Serial.println("Btn2 pressed");
                 if (xSemaphoreTake(mutex_handle, 100) == pdTRUE)
                 {
                     screens.screen_id = (screens.screen_id + 1) % APP_NUMBER;
