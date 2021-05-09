@@ -6,6 +6,7 @@
 
 // Include FreeRTOS TaskDelay
 #define INCLUDE_vTaskDelay 1
+#define configSUPPORT_DYNAMIC_ALLOCATION 1
 #include "freertos/FreeRTOS.h"
 #include "freertos/ringbuf.h"
 

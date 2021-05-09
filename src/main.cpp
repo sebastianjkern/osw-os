@@ -4,10 +4,9 @@
 #include "Arduino_ESP32SPI.h"
 #include "Arduino_GFX.h"
 
-// Include FreeRTOS TaskDelay
 #define INCLUDE_vTaskDelay 1
 #include "freertos/FreeRTOS.h"
-#include "freertos/ringbuf.h"
+#include "freertos/FreeRTOSConfig.h"
 
 #include "../lvgl/src/lvgl.h"
 
@@ -27,19 +26,75 @@ static void arc_loader(lv_task_t *t)
     }
 }
 
-void gui(void *parameter)
+lv_obj_t *app1()
 {
-    lv_obj_t *arc = lv_arc_create(lv_scr_act(), NULL);
+    lv_obj_t *scr = lv_obj_create(NULL, NULL);
+
+    lv_obj_t *arc = lv_arc_create(scr, NULL);
     lv_arc_set_bg_angles(arc, 0, 360);
     lv_arc_set_angles(arc, 270, 270);
     lv_obj_align(arc, NULL, LV_ALIGN_CENTER, 0, 0);
 
     lv_task_create(arc_loader, 20, LV_TASK_PRIO_LOWEST, arc);
 
+    return scr;
+}
+
+lv_obj_t *app2()
+{
+    lv_obj_t *scr = lv_obj_create(NULL, NULL);
+    return scr;
+}
+
+lv_obj_t *app3()
+{
+    lv_obj_t *scr = lv_obj_create(NULL, NULL);
+    return scr;
+}
+
+typedef struct
+{
+    uint8_t screen_id = 0;
+#define APP_NUMBER 3
+    lv_obj_t *(*functions[APP_NUMBER])(void) = {
+        app1,
+        app2,
+        app3};
+} screens_t;
+
+static screens_t screens;
+static SemaphoreHandle_t mutex_handle;
+static StaticSemaphore_t mutex_buffer;
+
+void screen_loader()
+{
+    // Make sure that the screen is loaded in the first execution
+    static uint8_t loaded_screen = -1;
+
+    // Take Mutex to ensure no memory faults
+    if (xSemaphoreTake(mutex_handle, 100) == pdTRUE)
+    {
+        if (screens.screen_id == loaded_screen)
+        {
+            xSemaphoreGive(mutex_handle);
+            return;
+        }
+
+        lv_obj_t *handle = lv_scr_act();
+        lv_scr_load(screens.functions[screens.screen_id]());
+        loaded_screen = screens.screen_id;
+        lv_obj_del(handle);
+        xSemaphoreGive(mutex_handle);
+    }
+}
+
+void gui(void *parameter)
+{
     uint32_t time;
 
     for (;;)
     {
+        screen_loader();
         time = lv_task_handler();
         vTaskDelay(time / portTICK_PERIOD_MS);
     }
@@ -59,10 +114,19 @@ void handle_input(void *parameter)
             if ((ev.pin == BTN_1) && (ev.event == BUTTON_DOWN))
             {
                 Serial.println("Btn1 pressed");
+                if (xSemaphoreTake(mutex_handle, 100) == pdTRUE)
+                {
+                    screens.screen_id = (screens.screen_id + 1) % APP_NUMBER;
+                    xSemaphoreGive(mutex_handle);
+                }
             }
             if ((ev.pin == BTN_2) && (ev.event == BUTTON_DOWN))
             {
-                Serial.println("Btn2 pressed");
+                if (xSemaphoreTake(mutex_handle, 100) == pdTRUE)
+                {
+                    screens.screen_id = (screens.screen_id + 1) % APP_NUMBER;
+                    xSemaphoreGive(mutex_handle);
+                }
             }
             if ((ev.pin == BTN_3) && (ev.event == BUTTON_DOWN))
             {
@@ -90,10 +154,18 @@ void setup()
 
     init_disp_drvs();
 
-    xTaskCreatePinnedToCore(gui, "gui", 10000, NULL, 1, NULL, 0);
+    mutex_handle = xSemaphoreCreateMutexStatic(&mutex_buffer);
+    if (mutex_handle != NULL)
+    {
+        xTaskCreatePinnedToCore(gui, "gui", 10000, NULL, 1, NULL, 0);
 
-    xTaskCreatePinnedToCore(handle_input, "input", 10000, NULL, 1, NULL, 1);
-    xTaskCreatePinnedToCore(read_sensors, "sensors", 10000, NULL, 1, NULL, 1);
+        xTaskCreatePinnedToCore(handle_input, "input", 10000, NULL, 1, NULL, 1);
+        xTaskCreatePinnedToCore(read_sensors, "sensors", 10000, NULL, 1, NULL, 1);
+    }
+    else
+    {
+        Serial.println("Failed to allocate mutex");
+    }
 }
 
 void loop()
